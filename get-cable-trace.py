@@ -155,6 +155,7 @@ def get_trace_target(device_name, termination_name):
             "name": termination_name,
             "endpoint": "interfaces",
             "id": iface.id,
+            "type": "interface",
         }
 
     front_port = get_front_port(device_name, termination_name)
@@ -165,6 +166,7 @@ def get_trace_target(device_name, termination_name):
             "name": termination_name,
             "endpoint": "front-ports",
             "id": front_port.id,
+            "type": "front_port",
         }
 
     raise ValueError(
@@ -206,10 +208,7 @@ def expand_trace_requests(trace_args):
     return trace_requests
 
 
-def get_trace(device_name, interface_name):
-    target = get_trace_target(device_name, interface_name)
-    url = f"{NB_URL}/api/dcim/{target['endpoint']}/{target['id']}/trace/"
-
+def get_api_response(url):
     response = requests.get(
         url,
         headers={
@@ -221,10 +220,41 @@ def get_trace(device_name, interface_name):
 
     response.raise_for_status()
 
+    return response.json()
+
+
+def get_interface_trace(target):
+    url = f"{NB_URL}/api/dcim/interfaces/{target['id']}/trace/"
+
+    return get_api_response(url)
+
+
+def get_front_port_trace(target):
+    url = f"{NB_URL}/api/dcim/front-ports/{target['id']}/paths/"
+    cable_paths = get_api_response(url)
+    trace = []
+
+    for cable_path in cable_paths:
+        path = cable_path.get("path", [])
+
+        for src_list, dst_list in zip(path, path[1:]):
+            trace.append((src_list, None, dst_list))
+
+    return trace
+
+
+def get_trace(device_name, interface_name):
+    target = get_trace_target(device_name, interface_name)
+
+    if target["type"] == "front_port":
+        trace = get_front_port_trace(target)
+    else:
+        trace = get_interface_trace(target)
+
     return {
         "device": target["device"],
         "interface": target["name"],
-        "trace": response.json(),
+        "trace": trace,
     }
 
 
