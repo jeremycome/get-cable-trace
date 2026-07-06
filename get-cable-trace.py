@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
 import csv
+import argparse
 import os
 import requests
-
-from pynetbox import api
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 ###########################################################################
 # Configuration
@@ -12,13 +13,11 @@ from pynetbox import api
 
 DEVICE = "p-1-th3"
 INTERFACE = "FH0/0/0/1"
+TRACES = [
+    (DEVICE, INTERFACE),
+]
 
 OUTPUT_FILE = "tracepath.csv"
-
-api_token = os.environ.get("NETBOX_TOKEN")
-
-if api_token is None:
-    raise SystemExit("La variable NETBOX_TOKEN n'est pas définie.")
 
 cert_path_relative = "~/configuration/tools/ca-alphatech.crt"
 cert_path_absolute = os.path.abspath(os.path.expanduser(cert_path_relative))
@@ -27,10 +26,8 @@ os.environ["REQUESTS_CA_BUNDLE"] = cert_path_absolute
 
 NB_URL = "https://netbox.alphalink.tech"
 
-nb = api(
-    url=NB_URL,
-    token=api_token,
-)
+api_token = None
+nb = None
 
 ###########################################################################
 # Fonctions
@@ -43,7 +40,25 @@ def csv_text(value):
     return f"'{value}"
 
 
+def configure_netbox():
+    global api_token
+    global nb
+
+    from pynetbox import api
+
+    api_token = os.environ.get("NETBOX_TOKEN")
+
+    if api_token is None:
+        raise SystemExit("La variable NETBOX_TOKEN n'est pas définie.")
+
+    nb = api(
+        url=NB_URL,
+        token=api_token,
+    )
+
+
 device_cache = {}
+device_cache_lock = Lock()
 
 
 def get_device_info(device):
@@ -61,103 +76,182 @@ def get_device_info(device):
 
     device_id = device["id"]
 
-    if device_id not in device_cache:
+    with device_cache_lock:
+        cached_device = device_cache.get(device_id)
 
-        d = nb.dcim.devices.get(device_id)
+    if cached_device is not None:
+        return cached_device
 
-        device_cache[device_id] = {
-            "display": d.name,
-            "rack": d.rack.name if d.rack else "",
-            "site": d.site.name if d.site else "",
+    d = nb.dcim.devices.get(device_id)
+
+    device_info = {
+        "display": d.name,
+        "rack": d.rack.name if d.rack else "",
+        "site": d.site.name if d.site else "",
+    }
+
+    with device_cache_lock:
+        device_cache[device_id] = device_info
+
+    return device_info
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Exporte un ou plusieurs Trace Path NetBox vers un CSV."
+    )
+    parser.add_argument(
+        "-t",
+        "--trace",
+        nargs=2,
+        action="append",
+        metavar=("DEVICE", "INTERFACE"),
+        help=(
+            "Trace à exporter. Peut être utilisé plusieurs fois, "
+            "par exemple: --trace p-1-th3 FH0/0/0/1 --trace p-2-th3 FH0/0/0/2"
+        ),
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        default=OUTPUT_FILE,
+        help=f"Fichier CSV de sortie. Défaut: {OUTPUT_FILE}",
+    )
+    parser.add_argument(
+        "-w",
+        "--workers",
+        type=int,
+        default=5,
+        help="Nombre maximum de traces lancées en parallèle. Défaut: 5",
+    )
+    return parser.parse_args()
+
+
+def get_interface(device_name, interface_name):
+    iface = nb.dcim.interfaces.get(
+        device=device_name,
+        name=interface_name,
+    )
+
+    if iface is None:
+        raise ValueError(f"Interface introuvable: {device_name} {interface_name}")
+
+    return iface
+
+
+def get_trace(device_name, interface_name):
+    iface = get_interface(device_name, interface_name)
+    url = f"{NB_URL}/api/dcim/interfaces/{iface.id}/trace/"
+
+    response = requests.get(
+        url,
+        headers={
+            "Authorization": f"Token {api_token}",
+            "Accept": "application/json",
+        },
+        verify=cert_path_absolute,
+    )
+
+    response.raise_for_status()
+
+    return {
+        "device": device_name,
+        "interface": interface_name,
+        "trace": response.json(),
+    }
+
+
+def get_traces(trace_requests, workers):
+    results = [None] * len(trace_requests)
+    max_workers = min(workers, len(trace_requests))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(get_trace, device_name, interface_name): index
+            for index, (device_name, interface_name) in enumerate(trace_requests)
         }
 
-    return device_cache[device_id]
+        for future in as_completed(futures):
+            index = futures[future]
+            results[index] = future.result()
+
+    return results
 
 
-###########################################################################
-# Recherche de l'interface
-###########################################################################
+def write_csv(output_file, traces):
+    with open(output_file, "w", newline="", encoding="utf-8-sig") as csvfile:
 
-iface = nb.dcim.interfaces.get(
-    device=DEVICE,
-    name=INTERFACE,
-)
+        writer = csv.writer(csvfile, delimiter=";")
 
-if iface is None:
-    raise SystemExit("Interface introuvable.")
+        writer.writerow([
+            "Trace",
+            "Device",
+            "Interface",
+            "Etape",
 
-###########################################################################
-# Trace Path
-###########################################################################
+            "Source",
+            "Source Device",
+            "Source Rack",
+            "Source Site",
 
-url = f"{NB_URL}/api/dcim/interfaces/{iface.id}/trace/"
+            "Destination",
+            "Destination Device",
+            "Destination Rack",
+            "Destination Site",
+        ])
 
-response = requests.get(
-    url,
-    headers={
-        "Authorization": f"Token {api_token}",
-        "Accept": "application/json",
-    },
-    verify=cert_path_absolute,
-)
+        for trace_result in traces:
+            trace_name = f"{trace_result['device']} {trace_result['interface']}"
+            previous_step = None
 
-response.raise_for_status()
+            for step, segment in enumerate(trace_result["trace"], start=1):
 
-trace = response.json()
+                src_list = segment[0]
+                dst_list = segment[2]
 
-###########################################################################
-# Génération du CSV
-###########################################################################
+                for src in src_list:
+                    for dst in dst_list:
 
-with open(OUTPUT_FILE, "w", newline="", encoding="utf-8-sig") as csvfile:
+                        current_step = ""
 
-    writer = csv.writer(csvfile, delimiter=";")
+                        if step != previous_step:
+                            current_step = step
+                            previous_step = step
 
-    writer.writerow([
-        "Etape",
+                        src_device = get_device_info(src.get("device"))
+                        dst_device = get_device_info(dst.get("device"))
 
-        "Source",
-        "Source Device",
-        "Source Rack",
-        "Source Site",
+                        writer.writerow([
+                            csv_text(trace_name),
+                            csv_text(trace_result["device"]),
+                            csv_text(trace_result["interface"]),
+                            current_step,
 
-        "Destination",
-        "Destination Device",
-        "Destination Rack",
-        "Destination Site",
-    ])
+                            csv_text(src["display"]),
+                            csv_text(src_device["display"]),
+                            csv_text(src_device["rack"]),
+                            csv_text(src_device["site"]),
 
-    previous_step = None
+                            csv_text(dst["display"]),
+                            csv_text(dst_device["display"]),
+                            csv_text(dst_device["rack"]),
+                            csv_text(dst_device["site"]),
+                        ])
 
-    for step, segment in enumerate(trace, start=1):
 
-        src_list = segment[0]
-        dst_list = segment[2]
+def main():
+    args = parse_args()
+    trace_requests = args.trace or TRACES
 
-        for src in src_list:
-            for dst in dst_list:
+    if args.workers < 1:
+        raise SystemExit("Le nombre de workers doit être supérieur ou égal à 1.")
 
-                current_step = ""
+    configure_netbox()
+    traces = get_traces(trace_requests, args.workers)
+    write_csv(args.output, traces)
 
-                if step != previous_step:
-                    current_step = step
-                    previous_step = step
+    print(f"CSV généré : {os.path.abspath(args.output)}")
 
-                src_device = get_device_info(src.get("device"))
-                dst_device = get_device_info(dst.get("device"))
 
-                writer.writerow([
-                    current_step,
-
-                    csv_text(src["display"]),
-                    csv_text(src_device["display"]),
-                    csv_text(src_device["rack"]),
-                    csv_text(src_device["site"]),
-
-                    csv_text(dst["display"]),
-                    csv_text(dst_device["display"]),
-                    csv_text(dst_device["rack"]),
-                    csv_text(dst_device["site"]),
-                ])
-
-print(f"CSV généré : {os.path.abspath(OUTPUT_FILE)}")
+if __name__ == "__main__":
+    main()
