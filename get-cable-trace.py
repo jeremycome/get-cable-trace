@@ -103,12 +103,12 @@ def parse_args():
     parser.add_argument(
         "-t",
         "--trace",
-        nargs=2,
+        nargs="+",
         action="append",
-        metavar=("DEVICE", "INTERFACE"),
+        metavar="DEVICE_OR_INTERFACE",
         help=(
-            "Trace à exporter. Peut être utilisé plusieurs fois, "
-            "par exemple: --trace p-1-th3 FH0/0/0/1 --trace p-2-th3 FH0/0/0/2"
+            "Trace à exporter: DEVICE INTERFACE ou seulement DEVICE pour "
+            "tracer toutes les interfaces du device. Peut être utilisé plusieurs fois."
         ),
     )
     parser.add_argument(
@@ -137,6 +137,39 @@ def get_interface(device_name, interface_name):
         raise ValueError(f"Interface introuvable: {device_name} {interface_name}")
 
     return iface
+
+
+def get_device_interfaces(device_name):
+    device = nb.dcim.devices.get(name=device_name)
+
+    if device is None:
+        raise ValueError(f"Device introuvable: {device_name}")
+
+    interfaces = [
+        (device_name, interface.name)
+        for interface in nb.dcim.interfaces.filter(device=device_name)
+    ]
+
+    if not interfaces:
+        raise ValueError(f"Aucune interface trouvée pour le device: {device_name}")
+
+    return interfaces
+
+
+def expand_trace_requests(trace_args):
+    trace_requests = []
+
+    for trace_arg in trace_args:
+        if len(trace_arg) == 1:
+            trace_requests.extend(get_device_interfaces(trace_arg[0]))
+        elif len(trace_arg) == 2:
+            trace_requests.append((trace_arg[0], trace_arg[1]))
+        else:
+            raise ValueError(
+                "Chaque --trace doit contenir DEVICE ou DEVICE INTERFACE."
+            )
+
+    return trace_requests
 
 
 def get_trace(device_name, interface_name):
@@ -237,12 +270,13 @@ def write_csv(output_file, traces):
 
 def main():
     args = parse_args()
-    trace_requests = args.trace or TRACES
+    trace_args = args.trace or TRACES
 
     if args.workers < 1:
         raise SystemExit("Le nombre de workers doit être supérieur ou égal à 1.")
 
     configure_netbox()
+    trace_requests = expand_trace_requests(trace_args)
     traces = get_traces(trace_requests, args.workers)
     write_csv(args.output, traces)
 
