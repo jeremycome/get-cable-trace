@@ -107,8 +107,9 @@ def parse_args():
         action="append",
         metavar="DEVICE_OR_INTERFACE",
         help=(
-            "Trace à exporter: DEVICE INTERFACE ou seulement DEVICE pour "
-            "tracer toutes les interfaces du device. Peut être utilisé plusieurs fois."
+            "Trace à exporter: DEVICE INTERFACE_OR_FRONT_PORT ou seulement "
+            "DEVICE pour tracer toutes les interfaces du device. Peut être "
+            "utilisé plusieurs fois."
         ),
     )
     parser.add_argument(
@@ -133,10 +134,42 @@ def get_interface(device_name, interface_name):
         name=interface_name,
     )
 
-    if iface is None:
-        raise ValueError(f"Interface introuvable: {device_name} {interface_name}")
-
     return iface
+
+
+def get_front_port(device_name, front_port_name):
+    front_port = nb.dcim.front_ports.get(
+        device=device_name,
+        name=front_port_name,
+    )
+
+    return front_port
+
+
+def get_trace_target(device_name, termination_name):
+    iface = get_interface(device_name, termination_name)
+
+    if iface is not None:
+        return {
+            "device": device_name,
+            "name": termination_name,
+            "endpoint": "interfaces",
+            "id": iface.id,
+        }
+
+    front_port = get_front_port(device_name, termination_name)
+
+    if front_port is not None:
+        return {
+            "device": device_name,
+            "name": termination_name,
+            "endpoint": "front-ports",
+            "id": front_port.id,
+        }
+
+    raise ValueError(
+        f"Interface ou front port introuvable: {device_name} {termination_name}"
+    )
 
 
 def get_device_interfaces(device_name):
@@ -166,15 +199,16 @@ def expand_trace_requests(trace_args):
             trace_requests.append((trace_arg[0], trace_arg[1]))
         else:
             raise ValueError(
-                "Chaque --trace doit contenir DEVICE ou DEVICE INTERFACE."
+                "Chaque --trace doit contenir DEVICE ou "
+                "DEVICE INTERFACE_OR_FRONT_PORT."
             )
 
     return trace_requests
 
 
 def get_trace(device_name, interface_name):
-    iface = get_interface(device_name, interface_name)
-    url = f"{NB_URL}/api/dcim/interfaces/{iface.id}/trace/"
+    target = get_trace_target(device_name, interface_name)
+    url = f"{NB_URL}/api/dcim/{target['endpoint']}/{target['id']}/trace/"
 
     response = requests.get(
         url,
@@ -188,8 +222,8 @@ def get_trace(device_name, interface_name):
     response.raise_for_status()
 
     return {
-        "device": device_name,
-        "interface": interface_name,
+        "device": target["device"],
+        "interface": target["name"],
         "trace": response.json(),
     }
 
