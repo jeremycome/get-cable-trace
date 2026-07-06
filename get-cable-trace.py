@@ -185,16 +185,14 @@ def write_csv(output_file, traces):
 
         writer.writerow([
             "Trace",
-            "Device",
-            "Interface",
             "Etape",
 
-            "Source",
+            "Source Interface",
             "Source Device",
             "Source Rack",
             "Source Site",
 
-            "Destination",
+            "Destination Interface",
             "Destination Device",
             "Destination Rack",
             "Destination Site",
@@ -223,8 +221,6 @@ def write_csv(output_file, traces):
 
                         writer.writerow([
                             csv_text(trace_name),
-                            csv_text(trace_result["device"]),
-                            csv_text(trace_result["interface"]),
                             current_step,
 
                             csv_text(src["display"]),
