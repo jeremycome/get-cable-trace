@@ -223,12 +223,6 @@ def get_api_response(url):
     return response.json()
 
 
-def get_interface_trace(target):
-    url = f"{NB_URL}/api/dcim/interfaces/{target['id']}/trace/"
-
-    return get_api_response(url)
-
-
 def node_key(node):
     return (
         node.get("url", ""),
@@ -302,8 +296,8 @@ def paths_from_target(path, target):
     return paths or [[target_group]]
 
 
-def get_front_port_trace(target):
-    url = f"{NB_URL}/api/dcim/front-ports/{target['id']}/paths/"
+def get_path_trace(target):
+    url = f"{NB_URL}/api/dcim/{target['endpoint']}/{target['id']}/paths/"
     cable_paths = get_api_response(url)
     trace = []
 
@@ -317,11 +311,7 @@ def get_front_port_trace(target):
 
 def get_trace(device_name, interface_name):
     target = get_trace_target(device_name, interface_name)
-
-    if target["type"] == "front_port":
-        trace = get_front_port_trace(target)
-    else:
-        trace = get_interface_trace(target)
+    trace = get_path_trace(target)
 
     return {
         "device": target["device"],

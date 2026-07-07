@@ -47,5 +47,43 @@ class SegmentEndpointPairsTest(unittest.TestCase):
         self.assertEqual(len(pairs), 6)
 
 
+class PathTraceTest(unittest.TestCase):
+    def test_interface_trace_uses_paths_endpoint(self):
+        requested_urls = []
+        original_get_api_response = get_cable_trace.get_api_response
+
+        def fake_get_api_response(url):
+            requested_urls.append(url)
+            return [{
+                "path": [
+                    [node("Hu0/0/0/2/0") | {
+                        "id": 100,
+                        "url": "https://netbox.example/api/dcim/interfaces/100/",
+                    }],
+                    [node("#15047")],
+                    [node("1/1")],
+                ],
+            }]
+
+        get_cable_trace.get_api_response = fake_get_api_response
+
+        try:
+            trace = get_cable_trace.get_path_trace({
+                "endpoint": "interfaces",
+                "id": 100,
+            })
+        finally:
+            get_cable_trace.get_api_response = original_get_api_response
+
+        self.assertEqual(
+            requested_urls,
+            [f"{get_cable_trace.NB_URL}/api/dcim/interfaces/100/paths/"],
+        )
+        self.assertEqual(
+            [(src[0]["display"], dst[0]["display"]) for src, _, dst in trace],
+            [("Hu0/0/0/2/0", "#15047"), ("#15047", "1/1")],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
