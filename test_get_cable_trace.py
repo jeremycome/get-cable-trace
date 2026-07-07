@@ -50,32 +50,12 @@ class SegmentEndpointPairsTest(unittest.TestCase):
 
 
 class PathTraceTest(unittest.TestCase):
-    def test_interface_trace_uses_neighbor_front_port_paths_endpoint(self):
+    def test_interface_trace_uses_direct_path_endpoint_without_summary_trace(self):
         requested_urls = []
         original_get_api_response = get_cable_trace.get_api_response
 
         def fake_get_api_response(url):
             requested_urls.append(url)
-            if url.endswith("/api/dcim/interfaces/100/trace/"):
-                return [
-                    [
-                        [node("Hu0/0/0/2/0") | {
-                            "id": 100,
-                            "url": "https://netbox.example/api/dcim/interfaces/100/",
-                        }],
-                        None,
-                        [node("#15047")],
-                    ],
-                    [
-                        [node("#15047")],
-                        None,
-                        [node("1/1") | {
-                            "id": 200,
-                            "url": "https://netbox.example/api/dcim/front-ports/200/",
-                        }],
-                    ],
-                ]
-
             return [{
                 "path": [
                     [node("Hu0/0/0/2/0") | {
@@ -106,8 +86,7 @@ class PathTraceTest(unittest.TestCase):
         self.assertEqual(
             requested_urls,
             [
-                f"{get_cable_trace.NB_URL}/api/dcim/interfaces/100/trace/",
-                f"{get_cable_trace.NB_URL}/api/dcim/front-ports/200/paths/",
+                f"{get_cable_trace.NB_URL}/api/dcim/interfaces/100/paths/",
             ],
         )
         self.assertEqual(
