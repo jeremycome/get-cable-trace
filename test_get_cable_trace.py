@@ -122,6 +122,39 @@ class PathTraceTest(unittest.TestCase):
 
 
 class ExcelOutputTest(unittest.TestCase):
+    def test_trace_name_is_only_written_once_per_trace(self):
+        original_get_device_info = get_cable_trace.get_device_info
+        get_cable_trace.get_device_info = lambda device: {
+            "display": "",
+            "rack": "",
+            "site": "",
+        }
+
+        trace = [{
+            "device": "p-1-tco",
+            "interface": "Hu0/0/0/2/0",
+            "trace": [
+                (
+                    [{"display": "Hu0/0/0/2/0"}],
+                    None,
+                    [{"display": "#15047"}],
+                ),
+                (
+                    [{"display": "#15047"}],
+                    None,
+                    [{"display": "1/1"}],
+                ),
+            ],
+        }]
+
+        try:
+            rows = list(get_cable_trace.trace_rows(trace))
+        finally:
+            get_cable_trace.get_device_info = original_get_device_info
+
+        self.assertEqual(rows[0]["values"][0], "p-1-tco Hu0/0/0/2/0")
+        self.assertEqual(rows[1]["values"][0], "")
+
     def test_writes_xlsx_with_readability_options(self):
         original_get_device_info = get_cable_trace.get_device_info
 

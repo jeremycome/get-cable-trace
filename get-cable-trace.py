@@ -44,7 +44,7 @@ def csv_text(value):
 
 
 HEADERS = [
-    "Trace",
+    "Trace demandée",
     "Etape",
     "Source Interface",
     "Source Device",
@@ -437,6 +437,7 @@ def segment_endpoint_pairs(src_list, dst_list):
 def trace_rows(traces):
     for trace_result in traces:
         trace_name = f"{trace_result['device']} {trace_result['interface']}"
+        first_trace_row = True
         previous_step = None
 
         for step, segment in enumerate(trace_result["trace"], start=1):
@@ -457,7 +458,7 @@ def trace_rows(traces):
                 yield {
                     "parallel": is_parallel,
                     "values": [
-                        trace_name,
+                        trace_name if first_trace_row else "",
                         current_step,
                         src["display"],
                         src_device["display"],
@@ -469,6 +470,7 @@ def trace_rows(traces):
                         dst_device["site"],
                     ],
                 }
+                first_trace_row = False
 
 
 def write_csv(output_file, traces):
