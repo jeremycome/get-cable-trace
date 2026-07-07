@@ -4,8 +4,11 @@ import csv
 import argparse
 import os
 import requests
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
+from datetime import datetime, timezone
+from xml.sax.saxutils import escape
 
 ###########################################################################
 # Configuration
@@ -17,7 +20,7 @@ TRACES = [
     (DEVICE, INTERFACE),
 ]
 
-OUTPUT_FILE = "tracepath.csv"
+OUTPUT_FILE = "tracepath.xlsx"
 
 cert_path_relative = "~/configuration/tools/ca-alphatech.crt"
 cert_path_absolute = os.path.abspath(os.path.expanduser(cert_path_relative))
@@ -38,6 +41,20 @@ def csv_text(value):
     if value is None or value == "":
         return ""
     return f"'{value}"
+
+
+HEADERS = [
+    "Trace",
+    "Etape",
+    "Source Interface",
+    "Source Device",
+    "Source Rack",
+    "Source Site",
+    "Destination Interface",
+    "Destination Device",
+    "Destination Rack",
+    "Destination Site",
+]
 
 
 def configure_netbox():
@@ -98,7 +115,7 @@ def get_device_info(device):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Exporte un ou plusieurs Trace Path NetBox vers un CSV."
+        description="Exporte un ou plusieurs Trace Path NetBox vers un Excel."
     )
     parser.add_argument(
         "-t",
@@ -116,7 +133,10 @@ def parse_args():
         "-o",
         "--output",
         default=OUTPUT_FILE,
-        help=f"Fichier CSV de sortie. Défaut: {OUTPUT_FILE}",
+        help=(
+            "Fichier de sortie .xlsx ou .csv. "
+            f"Défaut: {OUTPUT_FILE}"
+        ),
     )
     parser.add_argument(
         "-w",
@@ -403,60 +423,224 @@ def segment_endpoint_pairs(src_list, dst_list):
     return ((src, dst) for src in src_list for dst in dst_list)
 
 
+def trace_rows(traces):
+    for trace_result in traces:
+        trace_name = f"{trace_result['device']} {trace_result['interface']}"
+        previous_step = None
+
+        for step, segment in enumerate(trace_result["trace"], start=1):
+            src_list = segment[0]
+            dst_list = segment[2]
+            is_parallel = len(src_list) > 1 or len(dst_list) > 1
+
+            for src, dst in segment_endpoint_pairs(src_list, dst_list):
+                current_step = ""
+
+                if step != previous_step:
+                    current_step = step
+                    previous_step = step
+
+                src_device = get_device_info(src.get("device"))
+                dst_device = get_device_info(dst.get("device"))
+
+                yield {
+                    "parallel": is_parallel,
+                    "values": [
+                        trace_name,
+                        current_step,
+                        src["display"],
+                        src_device["display"],
+                        src_device["rack"],
+                        src_device["site"],
+                        dst["display"],
+                        dst_device["display"],
+                        dst_device["rack"],
+                        dst_device["site"],
+                    ],
+                }
+
+
 def write_csv(output_file, traces):
     with open(output_file, "w", newline="", encoding="utf-8-sig") as csvfile:
-
         writer = csv.writer(csvfile, delimiter=";")
+        writer.writerow(HEADERS)
 
-        writer.writerow([
-            "Trace",
-            "Etape",
+        for row in trace_rows(traces):
+            writer.writerow([
+                csv_text(value) if column_index != 1 else value
+                for column_index, value in enumerate(row["values"])
+            ])
 
-            "Source Interface",
-            "Source Device",
-            "Source Rack",
-            "Source Site",
 
-            "Destination Interface",
-            "Destination Device",
-            "Destination Rack",
-            "Destination Site",
-        ])
+def excel_column_name(index):
+    name = ""
 
-        for trace_result in traces:
-            trace_name = f"{trace_result['device']} {trace_result['interface']}"
-            previous_step = None
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        name = chr(65 + remainder) + name
 
-            for step, segment in enumerate(trace_result["trace"], start=1):
+    return name
 
-                src_list = segment[0]
-                dst_list = segment[2]
 
-                for src, dst in segment_endpoint_pairs(src_list, dst_list):
+def excel_cell_ref(row_index, column_index):
+    return f"{excel_column_name(column_index)}{row_index}"
 
-                    current_step = ""
 
-                    if step != previous_step:
-                        current_step = step
-                        previous_step = step
+def excel_cell(value, row_index, column_index, style_id):
+    cell_ref = excel_cell_ref(row_index, column_index)
+    style = f' s="{style_id}"' if style_id else ""
 
-                    src_device = get_device_info(src.get("device"))
-                    dst_device = get_device_info(dst.get("device"))
+    if value is None or value == "":
+        return f'<c r="{cell_ref}"{style}/>'
 
-                    writer.writerow([
-                        csv_text(trace_name),
-                        current_step,
+    if isinstance(value, int):
+        return f'<c r="{cell_ref}"{style}><v>{value}</v></c>'
 
-                        csv_text(src["display"]),
-                        csv_text(src_device["display"]),
-                        csv_text(src_device["rack"]),
-                        csv_text(src_device["site"]),
+    return (
+        f'<c r="{cell_ref}" t="inlineStr"{style}>'
+        f"<is><t>{escape(str(value))}</t></is></c>"
+    )
 
-                        csv_text(dst["display"]),
-                        csv_text(dst_device["display"]),
-                        csv_text(dst_device["rack"]),
-                        csv_text(dst_device["site"]),
-                    ])
+
+def xlsx_styles_xml():
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="3">
+    <font><sz val="10"/><name val="Aptos"/></font>
+    <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Aptos"/></font>
+    <font><b/><sz val="10"/><color rgb="FF1F2937"/><name val="Aptos"/></font>
+  </fonts>
+  <fills count="6">
+    <fill><patternFill patternType="none"/></fill>
+    <fill><patternFill patternType="gray125"/></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF1F4E79"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFF6F8FB"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFEAF3F8"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill>
+  </fills>
+  <borders count="2">
+    <border><left/><right/><top/><bottom/><diagonal/></border>
+    <border>
+      <left style="thin"><color rgb="FFD9E2EC"/></left>
+      <right style="thin"><color rgb="FFD9E2EC"/></right>
+      <top style="thin"><color rgb="FFD9E2EC"/></top>
+      <bottom style="thin"><color rgb="FFD9E2EC"/></bottom>
+      <diagonal/>
+    </border>
+  </borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="5">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+    <xf numFmtId="0" fontId="2" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+  </cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
+</styleSheet>"""
+
+
+def write_xlsx(output_file, traces):
+    rows = list(trace_rows(traces))
+    last_row = len(rows) + 1
+    last_column = excel_column_name(len(HEADERS))
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+    column_widths = [34, 8, 24, 28, 14, 28, 24, 28, 14, 28]
+    cols_xml = "".join(
+        f'<col min="{index}" max="{index}" width="{width}" customWidth="1"/>'
+        for index, width in enumerate(column_widths, start=1)
+    )
+
+    header_cells = "".join(
+        excel_cell(header, 1, column_index, 1)
+        for column_index, header in enumerate(HEADERS, start=1)
+    )
+    sheet_rows = [f'<row r="1" ht="22" customHeight="1">{header_cells}</row>']
+
+    for row_index, row in enumerate(rows, start=2):
+        style_id = 4 if row["parallel"] else 2 + (row_index % 2)
+        cells = "".join(
+            excel_cell(value, row_index, column_index, style_id)
+            for column_index, value in enumerate(row["values"], start=1)
+        )
+        sheet_rows.append(f'<row r="{row_index}">{cells}</row>')
+
+    sheet_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetViews>
+    <sheetView workbookViewId="0">
+      <pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>
+      <selection pane="bottomLeft" activeCell="A2" sqref="A2"/>
+    </sheetView>
+  </sheetViews>
+  <sheetFormatPr defaultRowHeight="16"/>
+  <cols>{cols_xml}</cols>
+  <sheetData>{''.join(sheet_rows)}</sheetData>
+  <autoFilter ref="A1:{last_column}{last_row}"/>
+  <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>
+</worksheet>"""
+
+    files = {
+        "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>""",
+        "_rels/.rels": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>""",
+        "xl/workbook.xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Trace Path" sheetId="1" r:id="rId1"/></sheets>
+</workbook>""",
+        "xl/_rels/workbook.xml.rels": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>""",
+        "xl/worksheets/sheet1.xml": sheet_xml,
+        "xl/styles.xml": xlsx_styles_xml(),
+        "docProps/core.xml": f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:creator>get-cable-trace</dc:creator>
+  <cp:lastModifiedBy>get-cable-trace</cp:lastModifiedBy>
+  <dcterms:created xsi:type="dcterms:W3CDTF">{now}</dcterms:created>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">{now}</dcterms:modified>
+</cp:coreProperties>""",
+        "docProps/app.xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>get-cable-trace</Application>
+</Properties>""",
+    }
+
+    with zipfile.ZipFile(output_file, "w", zipfile.ZIP_DEFLATED) as xlsx:
+        for filename, content in files.items():
+            xlsx.writestr(filename, content)
+
+
+def write_output(output_file, traces):
+    extension = os.path.splitext(output_file)[1].lower()
+
+    if extension == ".csv":
+        write_csv(output_file, traces)
+        return
+
+    if extension in ("", ".xlsx"):
+        write_xlsx(output_file, traces)
+        return
+
+    raise SystemExit("Extension de sortie non supportée. Utilisez .xlsx ou .csv.")
 
 
 def main():
@@ -469,9 +653,9 @@ def main():
     configure_netbox()
     trace_requests = expand_trace_requests(trace_args)
     traces = get_traces(trace_requests, args.workers)
-    write_csv(args.output, traces)
+    write_output(args.output, traces)
 
-    print(f"CSV généré : {os.path.abspath(args.output)}")
+    print(f"Fichier généré : {os.path.abspath(args.output)}")
 
 
 if __name__ == "__main__":

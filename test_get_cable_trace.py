@@ -2,7 +2,9 @@
 
 import importlib.util
 import pathlib
+import tempfile
 import unittest
+import zipfile
 
 
 SCRIPT_PATH = pathlib.Path(__file__).with_name("get-cable-trace.py")
@@ -102,6 +104,58 @@ class PathTraceTest(unittest.TestCase):
             [(src[0]["display"], dst[0]["display"]) for src, _, dst in trace],
             [("1/1", "#15047"), ("#15047", "Hu0/0/0/2/0")],
         )
+
+
+class ExcelOutputTest(unittest.TestCase):
+    def test_writes_xlsx_with_readability_options(self):
+        original_get_device_info = get_cable_trace.get_device_info
+
+        def fake_get_device_info(device):
+            if not device:
+                return {"display": "", "rack": "", "site": ""}
+
+            return {
+                "display": device["name"],
+                "rack": "R1",
+                "site": "Site A",
+            }
+
+        trace = [{
+            "device": "device-a",
+            "interface": "1/1",
+            "trace": [
+                (
+                    [{"display": "1/1", "device": {"name": "device-a"}}],
+                    None,
+                    [{"display": "#1"}],
+                ),
+                (
+                    [{"display": "#1"}],
+                    None,
+                    [{"display": "Eth1", "device": {"name": "device-b"}}],
+                ),
+            ],
+        }]
+
+        get_cable_trace.get_device_info = fake_get_device_info
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                output_file = pathlib.Path(tmpdir) / "tracepath.xlsx"
+                get_cable_trace.write_xlsx(output_file, trace)
+
+                with zipfile.ZipFile(output_file) as xlsx:
+                    names = set(xlsx.namelist())
+                    sheet = xlsx.read("xl/worksheets/sheet1.xml").decode()
+
+                self.assertIn("[Content_Types].xml", names)
+                self.assertIn("xl/workbook.xml", names)
+                self.assertIn("xl/styles.xml", names)
+                self.assertIn('state="frozen"', sheet)
+                self.assertIn('<autoFilter ref="A1:J3"/>', sheet)
+                self.assertIn("device-a 1/1", sheet)
+        finally:
+            get_cable_trace.get_device_info = original_get_device_info
 
 
 if __name__ == "__main__":
