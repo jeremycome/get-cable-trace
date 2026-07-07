@@ -271,6 +271,30 @@ def is_target_node(node, target):
     )
 
 
+def node_endpoint(node):
+    url = node.get("url", "")
+
+    if "/front-ports/" in url:
+        return "front-ports"
+
+    if "/interfaces/" in url:
+        return "interfaces"
+
+    return None
+
+
+def target_from_node(node):
+    endpoint = node_endpoint(node)
+
+    if endpoint is None or node.get("id") is None:
+        return None
+
+    return {
+        "endpoint": endpoint,
+        "id": node["id"],
+    }
+
+
 def target_group_index(path, target):
     for index, node_group in enumerate(path):
         if any(is_target_node(node, target) for node in node_group):
@@ -330,9 +354,23 @@ def path_contains_target(path, target):
     )
 
 
-def get_path_trace(target, exclude_target=None):
+def get_path_trace(target, exclude_target=None, ignore_not_found=False):
     url = f"{NB_URL}/api/dcim/{target['endpoint']}/{target['id']}/paths/"
-    cable_paths = get_api_response(url)
+
+    try:
+        cable_paths = get_api_response(url)
+    except requests.exceptions.HTTPError as error:
+        response = error.response
+
+        if (
+            ignore_not_found
+            and response is not None
+            and response.status_code == 404
+        ):
+            return None
+
+        raise
+
     trace = []
 
     for path in unique_paths(cable_paths):
@@ -346,16 +384,34 @@ def get_path_trace(target, exclude_target=None):
     return trace
 
 
+def first_front_port_target(trace):
+    for segment in trace:
+        for node_group in (segment[0], segment[2]):
+            for node in node_group:
+                if node_endpoint(node) == "front-ports":
+                    return target_from_node(node)
+
+    return None
+
+
 def get_trace_segments(target):
-    path_trace = get_path_trace(target)
+    path_trace = get_path_trace(target, ignore_not_found=True)
 
     if path_trace:
         return path_trace
 
     if target["type"] == "front_port":
-        return path_trace
+        return path_trace or []
 
-    return get_interface_trace(target)
+    trace = get_interface_trace(target)
+    front_port_target = first_front_port_target(trace)
+
+    if front_port_target is None:
+        return trace
+
+    front_port_trace = get_path_trace(front_port_target, exclude_target=target)
+
+    return front_port_trace or trace
 
 
 def get_trace(device_name, interface_name):
