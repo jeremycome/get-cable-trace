@@ -223,6 +223,12 @@ def get_api_response(url):
     return response.json()
 
 
+def get_interface_trace(target):
+    url = f"{NB_URL}/api/dcim/interfaces/{target['id']}/trace/"
+
+    return get_api_response(url)
+
+
 def node_key(node):
     return (
         node.get("url", ""),
@@ -243,6 +249,30 @@ def is_target_node(node, target):
         node.get("id") == target["id"]
         and f"/{target['endpoint']}/" in node.get("url", "")
     )
+
+
+def node_endpoint(node):
+    url = node.get("url", "")
+
+    if "/front-ports/" in url:
+        return "front-ports"
+
+    if "/interfaces/" in url:
+        return "interfaces"
+
+    return None
+
+
+def target_from_node(node):
+    endpoint = node_endpoint(node)
+
+    if endpoint is None or node.get("id") is None:
+        return None
+
+    return {
+        "endpoint": endpoint,
+        "id": node["id"],
+    }
 
 
 def target_group_index(path, target):
@@ -309,9 +339,32 @@ def get_path_trace(target):
     return trace
 
 
+def first_front_port_target(trace):
+    for segment in trace:
+        for node_group in (segment[0], segment[2]):
+            for node in node_group:
+                if node_endpoint(node) == "front-ports":
+                    return target_from_node(node)
+
+    return None
+
+
+def get_trace_segments(target):
+    if target["type"] == "front_port":
+        return get_path_trace(target)
+
+    trace = get_interface_trace(target)
+    front_port_target = first_front_port_target(trace)
+
+    if front_port_target is None:
+        return trace
+
+    return get_path_trace(front_port_target)
+
+
 def get_trace(device_name, interface_name):
     target = get_trace_target(device_name, interface_name)
-    trace = get_path_trace(target)
+    trace = get_trace_segments(target)
 
     return {
         "device": target["device"],

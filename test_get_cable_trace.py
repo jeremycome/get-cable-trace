@@ -48,40 +48,59 @@ class SegmentEndpointPairsTest(unittest.TestCase):
 
 
 class PathTraceTest(unittest.TestCase):
-    def test_interface_trace_uses_paths_endpoint(self):
+    def test_interface_trace_uses_neighbor_front_port_paths_endpoint(self):
         requested_urls = []
         original_get_api_response = get_cable_trace.get_api_response
 
         def fake_get_api_response(url):
             requested_urls.append(url)
+            if url.endswith("/api/dcim/interfaces/100/trace/"):
+                return [
+                    [
+                        [node("Hu0/0/0/2/0") | {
+                            "id": 100,
+                            "url": "https://netbox.example/api/dcim/interfaces/100/",
+                        }],
+                        None,
+                        [node("1/1") | {
+                            "id": 200,
+                            "url": "https://netbox.example/api/dcim/front-ports/200/",
+                        }],
+                    ],
+                ]
+
             return [{
                 "path": [
-                    [node("Hu0/0/0/2/0") | {
-                        "id": 100,
-                        "url": "https://netbox.example/api/dcim/interfaces/100/",
+                    [node("1/1") | {
+                        "id": 200,
+                        "url": "https://netbox.example/api/dcim/front-ports/200/",
                     }],
                     [node("#15047")],
-                    [node("1/1")],
+                    [node("Hu0/0/0/2/0")],
                 ],
             }]
 
         get_cable_trace.get_api_response = fake_get_api_response
 
         try:
-            trace = get_cable_trace.get_path_trace({
+            trace = get_cable_trace.get_trace_segments({
                 "endpoint": "interfaces",
                 "id": 100,
+                "type": "interface",
             })
         finally:
             get_cable_trace.get_api_response = original_get_api_response
 
         self.assertEqual(
             requested_urls,
-            [f"{get_cable_trace.NB_URL}/api/dcim/interfaces/100/paths/"],
+            [
+                f"{get_cable_trace.NB_URL}/api/dcim/interfaces/100/trace/",
+                f"{get_cable_trace.NB_URL}/api/dcim/front-ports/200/paths/",
+            ],
         )
         self.assertEqual(
             [(src[0]["display"], dst[0]["display"]) for src, _, dst in trace],
-            [("Hu0/0/0/2/0", "#15047"), ("#15047", "1/1")],
+            [("1/1", "#15047"), ("#15047", "Hu0/0/0/2/0")],
         )
 
 
