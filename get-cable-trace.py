@@ -255,7 +255,27 @@ def get_target_trace(target):
 
             rear_port_url = f"{NB_URL}/api/dcim/rear-ports/{rear_port_id}/trace/"
 
-            return get_api_response(rear_port_url)
+            try:
+                return get_api_response(rear_port_url)
+            except requests.exceptions.HTTPError as rear_error:
+                rear_response = rear_error.response
+
+                if (
+                    rear_response is not None
+                    and rear_response.status_code == 404
+                ):
+                    raise ValueError(
+                        "NetBox ne fournit pas d'endpoint trace exploitable "
+                        f"pour le front port {target['device']} {target['name']}. "
+                        "Trace front-port essayé: "
+                        f"/api/dcim/front-ports/{target['id']}/trace/. "
+                        "Trace rear-port essayé: "
+                        f"/api/dcim/rear-ports/{rear_port_id}/trace/. "
+                        "Le fallback /paths/ est volontairement désactivé "
+                        "car il génère des données incohérentes."
+                    ) from rear_error
+
+                raise
 
         raise
 
@@ -353,7 +373,12 @@ def main():
 
     configure_netbox()
     trace_requests = expand_trace_requests(trace_args)
-    traces = get_traces(trace_requests, args.workers)
+
+    try:
+        traces = get_traces(trace_requests, args.workers)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
+
     write_csv(args.output, traces)
 
     print(f"CSV généré : {os.path.abspath(args.output)}")

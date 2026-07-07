@@ -132,6 +132,23 @@ class FrontPortTraceTest(unittest.TestCase):
             ],
         )
 
+    def test_front_port_trace_fails_clearly_when_trace_endpoints_are_missing(self):
+        get_cable_trace.nb = FakeNetBox(
+            front_port=FakeTermination(200, rear_port={"id": 300})
+        )
+        get_cable_trace.api_token = "token"
+
+        def fake_get(url, **kwargs):
+            return FakeResponse({}, status_code=404)
+
+        get_cable_trace.requests.get = fake_get
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "NetBox ne fournit pas d'endpoint trace exploitable",
+        ):
+            get_cable_trace.get_trace("panel-a", "1/1")
+
     def test_trace_prefers_interface_when_name_exists_as_interface(self):
         requested_urls = []
         get_cable_trace.nb = FakeNetBox(
