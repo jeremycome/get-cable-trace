@@ -64,6 +64,11 @@ class PathTraceTest(unittest.TestCase):
                             "url": "https://netbox.example/api/dcim/interfaces/100/",
                         }],
                         None,
+                        [node("#15047")],
+                    ],
+                    [
+                        [node("#15047")],
+                        None,
                         [node("1/1") | {
                             "id": 200,
                             "url": "https://netbox.example/api/dcim/front-ports/200/",
@@ -73,12 +78,17 @@ class PathTraceTest(unittest.TestCase):
 
             return [{
                 "path": [
+                    [node("Hu0/0/0/2/0") | {
+                        "id": 100,
+                        "url": "https://netbox.example/api/dcim/interfaces/100/",
+                    }],
+                    [node("#15047")],
                     [node("1/1") | {
                         "id": 200,
                         "url": "https://netbox.example/api/dcim/front-ports/200/",
                     }],
-                    [node("#15047")],
-                    [node("Hu0/0/0/2/0")],
+                    [node("1/MPO-1")],
+                    [node("remote")],
                 ],
             }]
 
@@ -102,7 +112,12 @@ class PathTraceTest(unittest.TestCase):
         )
         self.assertEqual(
             [(src[0]["display"], dst[0]["display"]) for src, _, dst in trace],
-            [("1/1", "#15047"), ("#15047", "Hu0/0/0/2/0")],
+            [
+                ("Hu0/0/0/2/0", "#15047"),
+                ("#15047", "1/1"),
+                ("1/1", "1/MPO-1"),
+                ("1/MPO-1", "remote"),
+            ],
         )
 
 

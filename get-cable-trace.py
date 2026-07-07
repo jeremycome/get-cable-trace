@@ -346,13 +346,24 @@ def paths_from_target(path, target):
     return paths or [[target_group]]
 
 
-def get_path_trace(target):
+def path_contains_target(path, target):
+    return any(
+        is_target_node(node, target)
+        for node_group in path
+        for node in node_group
+    )
+
+
+def get_path_trace(target, exclude_target=None):
     url = f"{NB_URL}/api/dcim/{target['endpoint']}/{target['id']}/paths/"
     cable_paths = get_api_response(url)
     trace = []
 
     for path in unique_paths(cable_paths):
         for target_path in paths_from_target(path, target):
+            if exclude_target and path_contains_target(target_path[1:], exclude_target):
+                continue
+
             for src_list, dst_list in zip(target_path, target_path[1:]):
                 trace.append((src_list, None, dst_list))
 
@@ -379,7 +390,7 @@ def get_trace_segments(target):
     if front_port_target is None:
         return trace
 
-    return get_path_trace(front_port_target)
+    return trace + get_path_trace(front_port_target, exclude_target=target)
 
 
 def get_trace(device_name, interface_name):
