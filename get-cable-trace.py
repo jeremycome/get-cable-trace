@@ -443,7 +443,6 @@ def trace_rows(traces):
         for step, segment in enumerate(trace_result["trace"], start=1):
             src_list = segment[0]
             dst_list = segment[2]
-            is_parallel = len(src_list) > 1 or len(dst_list) > 1
 
             for src, dst in segment_endpoint_pairs(src_list, dst_list):
                 current_step = ""
@@ -456,7 +455,7 @@ def trace_rows(traces):
                 dst_device = get_device_info(dst.get("device"))
 
                 yield {
-                    "parallel": is_parallel,
+                    "step": step,
                     "values": [
                         trace_name if first_trace_row else "",
                         current_step,
@@ -523,13 +522,12 @@ def xlsx_styles_xml():
     <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Aptos"/></font>
     <font><b/><sz val="10"/><color rgb="FF1F2937"/><name val="Aptos"/></font>
   </fonts>
-  <fills count="6">
+  <fills count="5">
     <fill><patternFill patternType="none"/></fill>
     <fill><patternFill patternType="gray125"/></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FF1F4E79"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFF6F8FB"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFEAF3F8"/><bgColor indexed="64"/></patternFill></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFEDEFF2"/><bgColor indexed="64"/></patternFill></fill>
   </fills>
   <borders count="2">
     <border><left/><right/><top/><bottom/><diagonal/></border>
@@ -542,12 +540,11 @@ def xlsx_styles_xml():
     </border>
   </borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="5">
+  <cellXfs count="4">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
-    <xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
-    <xf numFmtId="0" fontId="2" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
   </cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
   <dxfs count="0"/>
@@ -561,7 +558,7 @@ def write_xlsx(output_file, traces):
     last_column = excel_column_name(len(HEADERS))
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-    column_widths = [34, 8, 24, 28, 14, 28, 24, 28, 14, 28]
+    column_widths = [42, 10, 34, 34, 18, 36, 34, 34, 18, 36]
     cols_xml = "".join(
         f'<col min="{index}" max="{index}" width="{width}" customWidth="1"/>'
         for index, width in enumerate(column_widths, start=1)
@@ -574,7 +571,7 @@ def write_xlsx(output_file, traces):
     sheet_rows = [f'<row r="1" ht="22" customHeight="1">{header_cells}</row>']
 
     for row_index, row in enumerate(rows, start=2):
-        style_id = 4 if row["parallel"] else 2 + (row_index % 2)
+        style_id = 2 + (row["step"] % 2)
         cells = "".join(
             excel_cell(value, row_index, column_index, style_id)
             for column_index, value in enumerate(row["values"], start=1)

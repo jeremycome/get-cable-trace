@@ -205,6 +205,49 @@ class ExcelOutputTest(unittest.TestCase):
         finally:
             get_cable_trace.get_device_info = original_get_device_info
 
+    def test_xlsx_alternates_neutral_styles_by_step(self):
+        original_get_device_info = get_cable_trace.get_device_info
+        get_cable_trace.get_device_info = lambda device: {
+            "display": "",
+            "rack": "",
+            "site": "",
+        }
+
+        trace = [{
+            "device": "device-a",
+            "interface": "1/1",
+            "trace": [
+                (
+                    [{"display": "1/RX"}, {"display": "1/TX"}],
+                    None,
+                    [{"display": "#1"}],
+                ),
+                (
+                    [{"display": "#1"}],
+                    None,
+                    [{"display": "Eth1"}],
+                ),
+            ],
+        }]
+
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                output_file = pathlib.Path(tmpdir) / "tracepath.xlsx"
+                get_cable_trace.write_xlsx(output_file, trace)
+
+                with zipfile.ZipFile(output_file) as xlsx:
+                    sheet = xlsx.read("xl/worksheets/sheet1.xml").decode()
+                    styles = xlsx.read("xl/styles.xml").decode()
+        finally:
+            get_cable_trace.get_device_info = original_get_device_info
+
+        self.assertNotIn("FFFFF2CC", styles)
+        self.assertIn('wrapText="1"', styles)
+        self.assertIn('width="42"', sheet)
+        self.assertIn('<c r="B2" s="3"><v>1</v></c>', sheet)
+        self.assertIn('<c r="B3" s="3"/>', sheet)
+        self.assertIn('<c r="B4" s="2"><v>2</v></c>', sheet)
+
 
 if __name__ == "__main__":
     unittest.main()
