@@ -347,6 +347,19 @@ def get_traces(trace_requests, workers):
     return results
 
 
+def segment_endpoint_pairs(src_list, dst_list):
+    if len(src_list) == len(dst_list):
+        return zip(src_list, dst_list)
+
+    if len(src_list) == 1:
+        return ((src_list[0], dst) for dst in dst_list)
+
+    if len(dst_list) == 1:
+        return ((src, dst_list[0]) for src in src_list)
+
+    return ((src, dst) for src in src_list for dst in dst_list)
+
+
 def write_csv(output_file, traces):
     with open(output_file, "w", newline="", encoding="utf-8-sig") as csvfile:
 
@@ -376,32 +389,31 @@ def write_csv(output_file, traces):
                 src_list = segment[0]
                 dst_list = segment[2]
 
-                for src in src_list:
-                    for dst in dst_list:
+                for src, dst in segment_endpoint_pairs(src_list, dst_list):
 
-                        current_step = ""
+                    current_step = ""
 
-                        if step != previous_step:
-                            current_step = step
-                            previous_step = step
+                    if step != previous_step:
+                        current_step = step
+                        previous_step = step
 
-                        src_device = get_device_info(src.get("device"))
-                        dst_device = get_device_info(dst.get("device"))
+                    src_device = get_device_info(src.get("device"))
+                    dst_device = get_device_info(dst.get("device"))
 
-                        writer.writerow([
-                            csv_text(trace_name),
-                            current_step,
+                    writer.writerow([
+                        csv_text(trace_name),
+                        current_step,
 
-                            csv_text(src["display"]),
-                            csv_text(src_device["display"]),
-                            csv_text(src_device["rack"]),
-                            csv_text(src_device["site"]),
+                        csv_text(src["display"]),
+                        csv_text(src_device["display"]),
+                        csv_text(src_device["rack"]),
+                        csv_text(src_device["site"]),
 
-                            csv_text(dst["display"]),
-                            csv_text(dst_device["display"]),
-                            csv_text(dst_device["rack"]),
-                            csv_text(dst_device["site"]),
-                        ])
+                        csv_text(dst["display"]),
+                        csv_text(dst_device["display"]),
+                        csv_text(dst_device["rack"]),
+                        csv_text(dst_device["site"]),
+                    ])
 
 
 def main():
