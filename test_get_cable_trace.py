@@ -38,10 +38,14 @@ class FakeTermination:
 
 
 class FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self.payload = payload
+        self.status_code = status_code
 
     def raise_for_status(self):
+        if self.status_code >= 400:
+            raise get_cable_trace.requests.exceptions.HTTPError(response=self)
+
         pass
 
     def json(self):
@@ -87,6 +91,55 @@ class FrontPortTraceTest(unittest.TestCase):
         self.assertEqual(
             get_cable_trace.nb.dcim.front_ports.calls,
             [{"device": "panel-a", "name": "1/MPO-1"}],
+        )
+
+    def test_front_port_trace_falls_back_to_paths_when_trace_endpoint_is_missing(self):
+        requested_urls = []
+        get_cable_trace.nb = FakeNetBox(front_port=FakeTermination(200))
+        get_cable_trace.api_token = "token"
+
+        def fake_get(url, **kwargs):
+            requested_urls.append(url)
+
+            if url.endswith("/api/dcim/front-ports/200/trace/"):
+                return FakeResponse({}, status_code=404)
+
+            return FakeResponse([{
+                "path": [
+                    [{
+                        "id": 200,
+                        "display": "1/1",
+                        "url": "https://netbox.example/api/dcim/front-ports/200/",
+                    }],
+                    [{"display": "#15048"}],
+                    [{
+                        "id": 300,
+                        "display": "1/MPO-1",
+                        "url": "https://netbox.example/api/dcim/front-ports/300/",
+                    }],
+                ],
+            }])
+
+        get_cable_trace.requests.get = fake_get
+
+        trace = get_cable_trace.get_trace("panel-a", "1/1")
+
+        self.assertEqual(
+            requested_urls,
+            [
+                f"{get_cable_trace.NB_URL}/api/dcim/front-ports/200/trace/",
+                f"{get_cable_trace.NB_URL}/api/dcim/front-ports/200/paths/",
+            ],
+        )
+        self.assertEqual(
+            [
+                (src[0]["display"], dst[0]["display"])
+                for src, _, dst in trace["trace"]
+            ],
+            [
+                ("1/1", "#15048"),
+                ("#15048", "1/MPO-1"),
+            ],
         )
 
     def test_trace_prefers_interface_when_name_exists_as_interface(self):
