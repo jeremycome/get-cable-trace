@@ -33,8 +33,9 @@ class FakeNetBox:
 
 
 class FakeTermination:
-    def __init__(self, termination_id):
+    def __init__(self, termination_id, rear_port=None):
         self.id = termination_id
+        self.rear_port = rear_port
 
 
 class FakeResponse:
@@ -93,9 +94,11 @@ class FrontPortTraceTest(unittest.TestCase):
             [{"device": "panel-a", "name": "1/MPO-1"}],
         )
 
-    def test_front_port_trace_falls_back_to_paths_when_trace_endpoint_is_missing(self):
+    def test_front_port_trace_falls_back_to_rear_port_trace_when_missing(self):
         requested_urls = []
-        get_cable_trace.nb = FakeNetBox(front_port=FakeTermination(200))
+        get_cable_trace.nb = FakeNetBox(
+            front_port=FakeTermination(200, rear_port={"id": 300})
+        )
         get_cable_trace.api_token = "token"
 
         def fake_get(url, **kwargs):
@@ -104,21 +107,9 @@ class FrontPortTraceTest(unittest.TestCase):
             if url.endswith("/api/dcim/front-ports/200/trace/"):
                 return FakeResponse({}, status_code=404)
 
-            return FakeResponse([{
-                "path": [
-                    [{
-                        "id": 200,
-                        "display": "1/1",
-                        "url": "https://netbox.example/api/dcim/front-ports/200/",
-                    }],
-                    [{"display": "#15048"}],
-                    [{
-                        "id": 300,
-                        "display": "1/MPO-1",
-                        "url": "https://netbox.example/api/dcim/front-ports/300/",
-                    }],
-                ],
-            }])
+            return FakeResponse([
+                ([{"display": "1/MPO-1"}], None, [{"display": "#15048"}]),
+            ])
 
         get_cable_trace.requests.get = fake_get
 
@@ -128,7 +119,7 @@ class FrontPortTraceTest(unittest.TestCase):
             requested_urls,
             [
                 f"{get_cable_trace.NB_URL}/api/dcim/front-ports/200/trace/",
-                f"{get_cable_trace.NB_URL}/api/dcim/front-ports/200/paths/",
+                f"{get_cable_trace.NB_URL}/api/dcim/rear-ports/300/trace/",
             ],
         )
         self.assertEqual(
@@ -137,8 +128,7 @@ class FrontPortTraceTest(unittest.TestCase):
                 for src, _, dst in trace["trace"]
             ],
             [
-                ("1/1", "#15048"),
-                ("#15048", "1/MPO-1"),
+                ("1/MPO-1", "#15048"),
             ],
         )
 

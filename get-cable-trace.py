@@ -160,11 +160,22 @@ def get_trace_target(device_name, termination_name):
     front_port = get_front_port(device_name, termination_name)
 
     if front_port is not None:
+        rear_port = getattr(front_port, "rear_port", None)
+        rear_port_id = None
+
+        if rear_port is not None:
+            rear_port_id = (
+                rear_port.get("id")
+                if isinstance(rear_port, dict)
+                else getattr(rear_port, "id", None)
+            )
+
         return {
             "device": device_name,
             "name": termination_name,
             "endpoint": "front-ports",
             "id": front_port.id,
+            "rear_port_id": rear_port_id,
         }
 
     raise ValueError(
@@ -221,92 +232,6 @@ def get_api_response(url):
     return response.json()
 
 
-def node_key(node):
-    return (
-        node.get("url", ""),
-        str(node.get("id", "")),
-        node.get("display", ""),
-    )
-
-
-def path_signature(path):
-    return tuple(
-        tuple(sorted(node_key(node) for node in node_group))
-        for node_group in path
-    )
-
-
-def is_target_node(node, target):
-    return (
-        node.get("id") == target["id"]
-        and f"/{target['endpoint']}/" in node.get("url", "")
-    )
-
-
-def target_group_index(path, target):
-    for index, node_group in enumerate(path):
-        if any(is_target_node(node, target) for node in node_group):
-            return index
-
-    return None
-
-
-def target_only_group(node_group, target):
-    target_nodes = [
-        node for node in node_group
-        if is_target_node(node, target)
-    ]
-
-    return target_nodes or node_group
-
-
-def unique_paths(cable_paths):
-    seen = set()
-
-    for cable_path in cable_paths:
-        path = cable_path.get("path", [])
-        signature = path_signature(path)
-        reverse_signature = tuple(reversed(signature))
-        canonical_signature = min(signature, reverse_signature)
-
-        if canonical_signature in seen:
-            continue
-
-        seen.add(canonical_signature)
-        yield path
-
-
-def paths_from_target(path, target):
-    index = target_group_index(path, target)
-
-    if index is None:
-        return [path]
-
-    target_group = target_only_group(path[index], target)
-    paths = []
-
-    if index < len(path) - 1:
-        paths.append([target_group] + path[index + 1:])
-
-    if index > 0:
-        paths.append([target_group] + list(reversed(path[:index])))
-
-    return paths or [[target_group]]
-
-
-def get_path_trace(target):
-    url = f"{NB_URL}/api/dcim/{target['endpoint']}/{target['id']}/paths/"
-    cable_paths = get_api_response(url)
-    trace = []
-
-    for path in unique_paths(cable_paths):
-        for target_path in paths_from_target(path, target):
-            for src_list, dst_list in zip(target_path, target_path[1:]):
-                trace.append((src_list, None, dst_list))
-
-    return trace
-
-
 def get_target_trace(target):
     url = f"{NB_URL}/api/dcim/{target['endpoint']}/{target['id']}/trace/"
 
@@ -320,7 +245,17 @@ def get_target_trace(target):
             and response is not None
             and response.status_code == 404
         ):
-            return get_path_trace(target)
+            rear_port_id = target.get("rear_port_id")
+
+            if rear_port_id is None:
+                raise ValueError(
+                    "Le front port n'a pas de rear port associé exploitable "
+                    "pour lancer le trace path."
+                ) from error
+
+            rear_port_url = f"{NB_URL}/api/dcim/rear-ports/{rear_port_id}/trace/"
+
+            return get_api_response(rear_port_url)
 
         raise
 
