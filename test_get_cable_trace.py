@@ -242,8 +242,11 @@ class ExcelOutputTest(unittest.TestCase):
             get_cable_trace.get_device_info = original_get_device_info
 
         self.assertNotIn("FFFFF2CC", styles)
+        self.assertNotIn("FF1F4E79", styles)
+        self.assertIn("FF4B5563", styles)
         self.assertIn('wrapText="1"', styles)
         self.assertIn('width="42"', sheet)
+        self.assertIn('width="14"', sheet)
         self.assertIn('<c r="B2" s="3"><v>1</v></c>', sheet)
         self.assertIn('<c r="B3" s="3"/>', sheet)
         self.assertIn('<c r="B4" s="2"><v>2</v></c>', sheet)

@@ -525,7 +525,7 @@ def xlsx_styles_xml():
   <fills count="5">
     <fill><patternFill patternType="none"/></fill>
     <fill><patternFill patternType="gray125"/></fill>
-    <fill><patternFill patternType="solid"><fgColor rgb="FF1F4E79"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FF4B5563"/><bgColor indexed="64"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFFFFFFF"/><bgColor indexed="64"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFEDEFF2"/><bgColor indexed="64"/></patternFill></fill>
   </fills>
@@ -558,7 +558,7 @@ def write_xlsx(output_file, traces):
     last_column = excel_column_name(len(HEADERS))
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-    column_widths = [42, 10, 34, 34, 18, 36, 34, 34, 18, 36]
+    column_widths = [42, 14, 34, 34, 18, 36, 34, 34, 18, 36]
     cols_xml = "".join(
         f'<col min="{index}" max="{index}" width="{width}" customWidth="1"/>'
         for index, width in enumerate(column_widths, start=1)
