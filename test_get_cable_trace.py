@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import argparse
 import pathlib
 import unittest
 
@@ -212,6 +213,22 @@ class FrontPortTraceTest(unittest.TestCase):
             ],
         )
         self.assertEqual(get_cable_trace.nb.dcim.front_ports.calls, [])
+
+
+class MainTest(unittest.TestCase):
+    def test_main_requires_trace_argument(self):
+        original_parse_args = get_cable_trace.parse_args
+        get_cable_trace.parse_args = lambda: argparse.Namespace(
+            trace=None,
+            workers=1,
+            output="tracepath.csv",
+        )
+
+        try:
+            with self.assertRaisesRegex(SystemExit, "Aucune trace demandée"):
+                get_cable_trace.main()
+        finally:
+            get_cable_trace.parse_args = original_parse_args
 
 
 if __name__ == "__main__":

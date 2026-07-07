@@ -12,12 +12,6 @@ from threading import Lock
 # Configuration
 ###########################################################################
 
-DEVICE = "p-1-th3"
-INTERFACE = "FH0/0/0/1"
-TRACES = [
-    (DEVICE, INTERFACE),
-]
-
 OUTPUT_FILE = "tracepath.csv"
 
 cert_path_relative = "~/configuration/tools/ca-alphatech.crt"
@@ -401,13 +395,17 @@ def write_csv(output_file, traces):
 
 def main():
     args = parse_args()
-    trace_args = args.trace or TRACES
 
     if args.workers < 1:
         raise SystemExit("Le nombre de workers doit être supérieur ou égal à 1.")
 
+    if not args.trace:
+        raise SystemExit(
+            "Aucune trace demandée. Utilisez -t DEVICE INTERFACE_OR_FRONT_PORT."
+        )
+
     configure_netbox()
-    trace_requests = expand_trace_requests(trace_args)
+    trace_requests = expand_trace_requests(args.trace)
 
     try:
         traces = get_traces(trace_requests, args.workers)
