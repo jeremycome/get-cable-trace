@@ -132,22 +132,62 @@ class FrontPortTraceTest(unittest.TestCase):
             ],
         )
 
-    def test_front_port_trace_fails_clearly_when_trace_endpoints_are_missing(self):
+    def test_front_port_uses_related_path_origin_when_trace_endpoints_are_missing(self):
+        requested_urls = []
         get_cable_trace.nb = FakeNetBox(
             front_port=FakeTermination(200, rear_port={"id": 300})
         )
         get_cable_trace.api_token = "token"
 
         def fake_get(url, **kwargs):
+            requested_urls.append(url)
+
+            if url.endswith("/api/dcim/front-ports/200/paths/"):
+                return FakeResponse([{
+                    "path": [
+                        [{
+                            "id": 100,
+                            "display": "Eth1",
+                            "url": "https://netbox.example/api/dcim/interfaces/100/",
+                        }],
+                        [{"display": "#1"}],
+                        [{
+                            "id": 200,
+                            "display": "1/1",
+                            "url": "https://netbox.example/api/dcim/front-ports/200/",
+                        }],
+                    ],
+                }])
+
+            if url.endswith("/api/dcim/interfaces/100/trace/"):
+                return FakeResponse([
+                    ([{"display": "Eth1"}], None, [{"display": "#1"}]),
+                ])
+
             return FakeResponse({}, status_code=404)
 
         get_cable_trace.requests.get = fake_get
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "NetBox ne fournit pas d'endpoint trace exploitable",
-        ):
-            get_cable_trace.get_trace("panel-a", "1/1")
+        trace = get_cable_trace.get_trace("panel-a", "1/1")
+
+        self.assertEqual(
+            requested_urls,
+            [
+                f"{get_cable_trace.NB_URL}/api/dcim/front-ports/200/trace/",
+                f"{get_cable_trace.NB_URL}/api/dcim/rear-ports/300/trace/",
+                f"{get_cable_trace.NB_URL}/api/dcim/front-ports/200/paths/",
+                f"{get_cable_trace.NB_URL}/api/dcim/interfaces/100/trace/",
+            ],
+        )
+        self.assertEqual(
+            [
+                (src[0]["display"], dst[0]["display"])
+                for src, _, dst in trace["trace"]
+            ],
+            [
+                ("Eth1", "#1"),
+            ],
+        )
 
     def test_trace_prefers_interface_when_name_exists_as_interface(self):
         requested_urls = []

@@ -3,6 +3,7 @@
 import csv
 import argparse
 import os
+import re
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
@@ -232,6 +233,49 @@ def get_api_response(url):
     return response.json()
 
 
+def trace_target_from_node(node):
+    url = node.get("url", "")
+    match = re.search(r"/api/dcim/([^/]+)/(\d+)/", url)
+
+    if match is None:
+        return None
+
+    return {
+        "device": "",
+        "name": node.get("display", ""),
+        "endpoint": match.group(1),
+        "id": int(match.group(2)),
+    }
+
+
+def get_related_path_origin_trace(target):
+    url = f"{NB_URL}/api/dcim/{target['endpoint']}/{target['id']}/paths/"
+    cable_paths = get_api_response(url)
+
+    for cable_path in cable_paths:
+        path = cable_path.get("path") or []
+
+        if not path or not path[0]:
+            continue
+
+        origin_target = trace_target_from_node(path[0][0])
+
+        if origin_target is None:
+            continue
+
+        origin_url = (
+            f"{NB_URL}/api/dcim/{origin_target['endpoint']}/"
+            f"{origin_target['id']}/trace/"
+        )
+
+        return get_api_response(origin_url)
+
+    raise ValueError(
+        "NetBox n'a pas retourné de CablePath exploitable pour retrouver "
+        f"l'origine du trace path du front port {target['device']} {target['name']}."
+    )
+
+
 def get_target_trace(target):
     url = f"{NB_URL}/api/dcim/{target['endpoint']}/{target['id']}/trace/"
 
@@ -264,16 +308,7 @@ def get_target_trace(target):
                     rear_response is not None
                     and rear_response.status_code == 404
                 ):
-                    raise ValueError(
-                        "NetBox ne fournit pas d'endpoint trace exploitable "
-                        f"pour le front port {target['device']} {target['name']}. "
-                        "Trace front-port essayé: "
-                        f"/api/dcim/front-ports/{target['id']}/trace/. "
-                        "Trace rear-port essayé: "
-                        f"/api/dcim/rear-ports/{rear_port_id}/trace/. "
-                        "Le fallback /paths/ est volontairement désactivé "
-                        "car il génère des données incohérentes."
-                    ) from rear_error
+                    return get_related_path_origin_trace(target)
 
                 raise
 
